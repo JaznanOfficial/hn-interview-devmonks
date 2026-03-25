@@ -22,7 +22,7 @@ OPENAI_MODEL=gpt-4o-mini
 PORT=3001
 ```
 
-> The `.env` file is git-ignored and never committed. Your secrets stay local and safe.
+> The `.env` file is git-ignored and never committed. Your secrets stay local and safe. But for this project, I've added the API key to the `.env` file for convenience.
 
 ### Step 2 — Run
 
