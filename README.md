@@ -6,20 +6,23 @@ A full-stack Hacker News client with AI discussion summaries, bookmarking, and n
 
 ## Quick Start
 
-### Step 1 — Add your OpenAI API key
+### Step 1 — Set up environment variables
 
-Open **`config.js`** in the root of this project and replace the placeholder with your real key:
+Copy the example environment file and add your OpenAI API key:
 
-```js
-// config.js
-module.exports = {
-  OPENAI_API_KEY: "sk-proj-YOUR-REAL-KEY-HERE",   // ← edit this line
-  OPENAI_MODEL:   "gpt-4o",
-  PORT:           3001,
-};
+```bash
+cp .env.example .env
 ```
 
-> This file is intentionally committed and public so that `docker-compose up` works with zero extra setup steps. No `.env` file needed.
+Edit **`.env`** and add your real OpenAI API key:
+
+```bash
+OPENAI_API_KEY=sk-proj-YOUR-REAL-KEY-HERE
+OPENAI_MODEL=gpt-4o-mini
+PORT=3001
+```
+
+> The `.env` file is git-ignored and never committed. Your secrets stay local and safe.
 
 ### Step 2 — Run
 
@@ -40,6 +43,7 @@ That's it.
 
 - **Feed** — Top / New / Best stories from the Hacker News API with pagination
 - **Comments** — Full nested/threaded comment tree with collapse/expand
+- **Infinite Scroll Comments** — Load comments on-demand as you scroll; shows progress (X of Y comments)
 - **AI Summary** — Click "Summarize discussion" on any story to get key points, overall sentiment, and a short summary powered by GPT-4o
 - **Bookmarks** — Save and remove stories; persisted in SQLite across restarts
 - **Search** — Filter bookmarks by title or author
@@ -94,8 +98,8 @@ The data is two simple tables (bookmarks, summaries) with a 1:1 relationship key
 ### Why raw OpenAI SDK over LangChain / Vercel AI SDK?
 LangChain solves problems this project doesn't have (retrieval chains, agents, multi-step tool use). The Vercel AI SDK is designed around Next.js streaming patterns. Using `openai` directly means every line of the AI integration is readable and explainable — critical for a live code review.
 
-### Why `config.js` instead of `.env`?
-The evaluator runs `docker-compose up` without any setup beyond cloning the repo. A `.env` file would require manual creation. A committed `config.js` with a clear placeholder comment makes the one required step (inserting the API key) obvious and hard to miss.
+### Why `.env` files for secrets?
+Secrets should never be committed to version control. The `.env` file is git-ignored and never committed. A `.env.example` template shows what variables are needed. This is the industry standard for secure credential management.
 
 ### Why no streaming on the summary endpoint?
 The spec asks for a loading state and graceful timeout handling — a spinner while awaiting JSON satisfies that. Streaming adds SSE headers, partial-text state management on the frontend, and makes JSON parsing trickier. Non-streaming is simpler and equally correct for this scope.
@@ -107,6 +111,13 @@ Comments are fetched recursively to 4 levels deep, with a max of 20 children per
 1. **In-memory Map** — instant hit on repeated clicks within the same session
 2. **SQLite `summaries` table** — survives container restarts; re-opening the app never re-calls the API for a story already summarized
 
+### Infinite scroll for comments
+Instead of loading all comments upfront (which can be slow for busy threads), comments are paginated server-side with `offset` and `limit` query parameters. The frontend uses `IntersectionObserver` to detect when the user scrolls near the bottom and automatically fetches the next batch. This approach:
+- Reduces initial load time for large threads
+- Respects HN API rate limits by fetching in chunks
+- Provides smooth UX with a "Loading more comments..." indicator
+- Shows progress with "X of Y comments" counter
+
 ---
 
 ## Tradeoffs
@@ -117,7 +128,8 @@ Comments are fetched recursively to 4 levels deep, with a max of 20 children per
 | No streaming | Summary feels slower on weak API connections |
 | Comment truncation (150 top-level, ~12k chars) | Very large threads lose tail comments |
 | No auth | Single-user only; anyone with the URL sees all bookmarks |
-| Comments fetched on-demand | Cold load of a busy thread can take 2-4s |
+| Paginated comment loading | Extra network requests as user scrolls (vs. load-all-at-once) |
+| IntersectionObserver for infinite scroll | Requires JavaScript; no progressive enhancement for non-JS clients |
 
 ---
 
@@ -130,6 +142,11 @@ Comments are fetched recursively to 4 levels deep, with a max of 20 children per
 - **Offline support** — cache comment trees in SQLite so previously-opened stories work without network
 - **Export bookmarks** — JSON / CSV download
 - **Tests** — unit tests for the summarize prompt builder and comment flattener; integration test for the bookmark CRUD routes
+- **Nested comment infinite scroll** — extend pagination to nested replies, not just top-level comments
+- **Comment filtering** — hide deleted/dead comments by default with toggle to show them
+- **Dark mode toggle** — persist theme preference in localStorage
+- **Rate limiting** — add request throttling to prevent API abuse
+- **Error recovery** — retry failed comment fetches with exponential backoff
 
 ---
 
@@ -138,8 +155,17 @@ Comments are fetched recursively to 4 levels deep, with a max of 20 children per
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/stories?feed=top\|new\|best&page=1` | Paginated story list |
-| GET | `/api/item/:id` | Story + nested comment tree |
+| GET | `/api/item/:id?offset=0&limit=20` | Story + paginated comment tree (infinite scroll) |
 | POST | `/api/summarize` | `{ storyId, title }` → AI summary |
 | GET | `/api/bookmarks?q=search` | List / search bookmarks |
 | POST | `/api/bookmarks` | Save a story |
 | DELETE | `/api/bookmarks/:id` | Remove a bookmark |
+
+### Comment Pagination Parameters
+- **`offset`** — number of top-level comments to skip (default: 0)
+- **`limit`** — max comments to return per request (default: 20, max: 100)
+- **Response includes:**
+  - `comments` — array of comment objects
+  - `totalComments` — total number of top-level comments available
+  - `offset` — offset used in request
+  - `limit` — limit used in request
