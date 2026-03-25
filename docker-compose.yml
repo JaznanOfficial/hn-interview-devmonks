@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # The browser (running on the host machine) reaches the backend
+        # via localhost:3001 — not via the Docker service name.
+        VITE_API_URL: "http://localhost:3001"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    restart: unless-stopped
